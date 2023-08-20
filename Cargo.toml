@@ -16,7 +16,3 @@ predicates = "3.0.3"
 [lib]
 test = false
 doctest = false
-
-[[kvs]]
-test = false
-doctest = false
