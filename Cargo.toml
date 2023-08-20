@@ -1,0 +1,22 @@
+[package]
+name = "kvs"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+clap = { version = "4.3.23", features = [ "cargo" ] }
+
+
+[dev-dependencies]
+assert_cmd = "2.0.12"
+predicates = "3.0.3"
+
+[lib]
+test = false
+doctest = false
+
+[[kvs]]
+test = false
+doctest = false
