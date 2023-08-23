@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     fs::{File, OpenOptions},
     io::{BufReader, Write},
     path::PathBuf,
@@ -14,6 +15,7 @@ pub type Result<T> = result::Result<T, Error>;
 
 /// A container for storing key-value pairs in memory.
 pub struct KvStore {
+    index: HashMap<String, usize>,
     log: File,
 }
 
@@ -31,7 +33,10 @@ impl KvStore {
             .open(path_buf)
             .unwrap();
 
-        Ok(KvStore { log: file })
+        Ok(KvStore {
+            log: file,
+            index: HashMap::new(),
+        })
     }
 
     /// Sets a value corresponding to a key in the [`KvStore`]
@@ -69,25 +74,29 @@ impl KvStore {
     /// store.get(String::from("key1"));
     /// ```
     pub fn get(&mut self, key: String) -> Result<Option<String>> {
-        let stream = Deserializer::from_reader(BufReader::new(&self.log)) // new line
+        let mut stream = Deserializer::from_reader(BufReader::new(&self.log)) // new line
             .into_iter::<Command>();
         let mut found = false;
         let mut value: Option<String> = None;
-        for command in stream {
-            match command {
-                Ok(c) => {
-                    if c.key == key && c.command_type == CommandType::SET {
-                        found = true;
-                        value = c.value;
-                    }
-                    if c.key == key && c.command_type == CommandType::RM {
-                        found = false;
-                        value = None;
-                    }
-                }
-                Err(err) => eprintln!("{:?}", err),
+
+        let mut first = true;
+        while let Some(Ok(c)) = stream.next() {
+            if first {
+                self.index.insert(key.to_string(), 0);
+                first = false;
+            } else {
+                self.index.insert(key.to_string(), stream.byte_offset());
+            }
+            if c.key == key && c.command_type == CommandType::SET {
+                found = true;
+                value = c.value;
+            }
+            if c.key == key && c.command_type == CommandType::RM {
+                found = false;
+                value = None;
             }
         }
+
         if found {
             let command = Command {
                 key: key.to_string(),
@@ -116,17 +125,22 @@ impl KvStore {
     /// store.remove(String::from("key1"));
     /// ```
     pub fn remove(&mut self, key: String) -> Result<()> {
-        let stream = Deserializer::from_reader(BufReader::new(&self.log)) // new line
+        let mut stream = Deserializer::from_reader(BufReader::new(&self.log)) // new line
             .into_iter::<Command>();
         let mut found = false;
-        for command in stream {
-            match command {
-                Ok(c) => {
-                    if c.key == key {
-                        found = true;
-                    }
-                }
-                Err(err) => eprintln!("{:?}", err),
+        let mut first = true;
+        while let Some(Ok(c)) = stream.next() {
+            if first {
+                self.index.insert(key.to_string(), 0);
+                first = false;
+            } else {
+                self.index.insert(key.to_string(), stream.byte_offset());
+            }
+            if c.key == key && c.command_type == CommandType::SET {
+                found = true;
+            }
+            if c.key == key && c.command_type == CommandType::RM {
+                found = false;
             }
         }
 
