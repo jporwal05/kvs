@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     fs::{File, OpenOptions},
-    io::{BufReader, Write},
+    io::{BufReader, Seek, Write},
     path::PathBuf,
     result,
 };
@@ -58,6 +58,7 @@ impl KvStore {
         };
         let command_json = serde_json::to_string(&command).unwrap();
         self.log.write_all(command_json.as_bytes())?;
+        self.log.seek(std::io::SeekFrom::Start(0))?;
         Ok(())
     }
 
@@ -106,6 +107,7 @@ impl KvStore {
 
             let command_json = serde_json::to_string(&command)?;
             self.log.write_all(command_json.as_bytes())?;
+            self.log.seek(std::io::SeekFrom::Start(0))?;
             println!("{}", value.as_ref().unwrap());
             return Ok(value);
         }
@@ -153,6 +155,7 @@ impl KvStore {
 
             let command_json = serde_json::to_string(&command)?;
             self.log.write_all(command_json.as_bytes())?;
+            self.log.seek(std::io::SeekFrom::Start(0))?;
             Ok(())
         } else {
             Err(failure::err_msg("Key not found"))
