@@ -163,6 +163,7 @@ impl KvStore {
     }
 }
 
+/// A container for storing commands
 #[derive(Debug, Serialize, Deserialize)]
 struct Command {
     key: String,
@@ -170,6 +171,7 @@ struct Command {
     command_type: CommandType,
 }
 
+/// Command type to identify the commands
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 enum CommandType {
     SET,
