@@ -144,19 +144,13 @@ impl KvStore {
 fn replay(file: &File) -> Result<HashMap<String, u64>> {
     let mut stream = Deserializer::from_reader(BufReader::new(file)) // new line
         .into_iter::<Command>();
-    let mut first = true;
     let mut index = HashMap::new();
     let mut byte_offset = 0;
     while let Some(Ok(c)) = stream.next() {
         if c.command_type == CommandType::RM {
             index.remove(&c.key);
         } else {
-            if first {
-                index.insert(c.key.to_string(), byte_offset as u64);
-                first = false;
-            } else {
-                index.insert(c.key.to_string(), byte_offset as u64);
-            }
+            index.insert(c.key.to_string(), byte_offset as u64);
         }
         byte_offset = stream.byte_offset();
     }
