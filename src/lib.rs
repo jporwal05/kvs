@@ -10,7 +10,7 @@ use failure::Error;
 use serde::{Deserialize, Serialize};
 use serde_json::Deserializer;
 
-/// A [`Result`] that returns type [`T`] otherwise [`Error`]
+/// A [`Result`] that returns type `T` otherwise [`Error`]
 pub type Result<T> = result::Result<T, Error>;
 
 /// A container for storing key-value pairs in memory.
