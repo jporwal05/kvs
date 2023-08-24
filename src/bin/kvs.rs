@@ -49,7 +49,10 @@ fn main() -> Result<()> {
                     let mut store = KvStore::open(".").unwrap();
                     match store.remove(arg2.to_string()) {
                         Ok(_) => (),
-                        Err(_) => exit(1),
+                        Err(_) => {
+                            println!("Key not found");
+                            exit(1)
+                        }
                     }
                 }
                 None => panic!(),

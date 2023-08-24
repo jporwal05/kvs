@@ -57,7 +57,7 @@ impl KvStore {
             command_type: CommandType::SET,
         };
         let command_json = serde_json::to_string(&command).unwrap();
-        self.log.write_all(command_json.as_bytes()).unwrap();
+        self.log.write_all(command_json.as_bytes())?;
         Ok(())
     }
 
@@ -104,8 +104,8 @@ impl KvStore {
                 command_type: CommandType::GET,
             };
 
-            let command_json = serde_json::to_string(&command).unwrap();
-            self.log.write_all(command_json.as_bytes()).unwrap();
+            let command_json = serde_json::to_string(&command)?;
+            self.log.write_all(command_json.as_bytes())?;
             println!("{}", value.as_ref().unwrap());
             return Ok(value);
         }
@@ -151,11 +151,10 @@ impl KvStore {
                 command_type: CommandType::RM,
             };
 
-            let command_json = serde_json::to_string(&command).unwrap();
-            self.log.write_all(command_json.as_bytes()).unwrap();
+            let command_json = serde_json::to_string(&command)?;
+            self.log.write_all(command_json.as_bytes())?;
             Ok(())
         } else {
-            println!("Key not found");
             Err(failure::err_msg("Key not found"))
         }
     }
