@@ -15,7 +15,7 @@ pub type Result<T> = result::Result<T, Error>;
 
 /// A container for storing key-value pairs in memory.
 pub struct KvStore {
-    index: HashMap<String, usize>,
+    index: HashMap<String, u64>,
     log: File,
 }
 
@@ -33,9 +33,12 @@ impl KvStore {
             .open(path_buf)
             .unwrap();
 
+        // replay log and create index
+        let index = replay(&file)?;
+
         Ok(KvStore {
             log: file,
-            index: HashMap::new(),
+            index: index,
         })
     }
 
@@ -57,7 +60,9 @@ impl KvStore {
             command_type: CommandType::SET,
         };
         let command_json = serde_json::to_string(&command).unwrap();
+        let current_offset = self.log.seek(std::io::SeekFrom::End(0))?;
         self.log.write_all(command_json.as_bytes())?;
+        self.index.insert(key.to_string(), current_offset);
         self.log.seek(std::io::SeekFrom::Start(0))?;
         Ok(())
     }
@@ -75,38 +80,21 @@ impl KvStore {
     /// store.get(String::from("key1"));
     /// ```
     pub fn get(&mut self, key: String) -> Result<Option<String>> {
-        let mut stream = Deserializer::from_reader(BufReader::new(&self.log)) // new line
-            .into_iter::<Command>();
-        let mut found = false;
         let mut value: Option<String> = None;
-
-        let mut first = true;
-        while let Some(Ok(c)) = stream.next() {
-            if first {
-                self.index.insert(key.to_string(), 0);
-                first = false;
-            } else {
-                self.index.insert(key.to_string(), stream.byte_offset());
-            }
-            if c.key == key && c.command_type == CommandType::SET {
-                found = true;
+        let mut found = false;
+        if self.index.contains_key(&key) {
+            self.log.seek(std::io::SeekFrom::Start(
+                self.index.get(&key).unwrap().clone(),
+            ))?;
+            let mut stream = Deserializer::from_reader(BufReader::new(&self.log)) // new line
+                .into_iter::<Command>();
+            if let Some(Ok(c)) = stream.next() {
                 value = c.value;
-            }
-            if c.key == key && c.command_type == CommandType::RM {
-                found = false;
-                value = None;
+                found = true;
             }
         }
 
         if found {
-            let command = Command {
-                key: key.to_string(),
-                value: None,
-                command_type: CommandType::GET,
-            };
-
-            let command_json = serde_json::to_string(&command)?;
-            self.log.write_all(command_json.as_bytes())?;
             self.log.seek(std::io::SeekFrom::Start(0))?;
             println!("{}", value.as_ref().unwrap());
             return Ok(value);
@@ -127,32 +115,13 @@ impl KvStore {
     /// store.remove(String::from("key1"));
     /// ```
     pub fn remove(&mut self, key: String) -> Result<()> {
-        let mut stream = Deserializer::from_reader(BufReader::new(&self.log)) // new line
-            .into_iter::<Command>();
-        let mut found = false;
-        let mut first = true;
-        while let Some(Ok(c)) = stream.next() {
-            if first {
-                self.index.insert(key.to_string(), 0);
-                first = false;
-            } else {
-                self.index.insert(key.to_string(), stream.byte_offset());
-            }
-            if c.key == key && c.command_type == CommandType::SET {
-                found = true;
-            }
-            if c.key == key && c.command_type == CommandType::RM {
-                found = false;
-            }
-        }
-
-        if found {
+        if self.index.contains_key(&key) {
+            self.index.remove(&key);
             let command = Command {
                 key: key.to_string(),
                 value: None,
                 command_type: CommandType::RM,
             };
-
             let command_json = serde_json::to_string(&command)?;
             self.log.write_all(command_json.as_bytes())?;
             self.log.seek(std::io::SeekFrom::Start(0))?;
@@ -161,6 +130,28 @@ impl KvStore {
             Err(failure::err_msg("Key not found"))
         }
     }
+}
+
+fn replay(file: &File) -> Result<HashMap<String, u64>> {
+    let mut stream = Deserializer::from_reader(BufReader::new(file)) // new line
+        .into_iter::<Command>();
+    let mut first = true;
+    let mut index = HashMap::new();
+    let mut byte_offset = 0;
+    while let Some(Ok(c)) = stream.next() {
+        if c.command_type == CommandType::RM {
+            index.remove(&c.key);
+        } else {
+            if first {
+                index.insert(c.key.to_string(), byte_offset as u64);
+                first = false;
+            } else {
+                index.insert(c.key.to_string(), byte_offset as u64);
+            }
+        }
+        byte_offset = stream.byte_offset();
+    }
+    Ok(index)
 }
 
 /// A container for storing commands
