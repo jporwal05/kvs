@@ -62,6 +62,15 @@ impl KvStore {
         let command_json = serde_json::to_string(&command).unwrap();
         let current_offset = self.log.seek(std::io::SeekFrom::End(0))?;
         self.log.write_all(command_json.as_bytes())?;
+        // TODO: log compaction strategy
+        // get to know if key already existed or not and get the previous offset if it did
+        // maintain a separate set of offsets to be removed from the file
+        // seek from the beginning and read as stream
+        // skip the offsets to be removed by doing a look-up from the set
+        // write the valid entries in another file
+        // make the store point to the new file and then continue
+        // do same thing on every write but only if the set has grown to a certain amount - this is to avoid frequent compaction
+        // check efficiency for removal of values from a set - or else try another data structure, stack?
         self.index.insert(key.to_string(), current_offset);
         self.log.seek(std::io::SeekFrom::Start(0))?;
         Ok(())
