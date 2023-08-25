@@ -30,6 +30,15 @@ pub struct KvStore {
 
 /// Implementation of [`KvStore`]
 impl KvStore {
+    /// Opens a [`KvStore`] backed by a WAL at specified path
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use kvs::KvStore;
+    /// # use tempfile::TempDir;
+    ///
+    /// let mut store = KvStore::open(TempDir::new().unwrap().path()).unwrap();
     pub fn open(path: impl Into<PathBuf>) -> Result<KvStore> {
         let mut path_buf = PathBuf::from(path.into());
         path_buf.push(STORE_NAME);
