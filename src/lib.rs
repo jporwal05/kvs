@@ -6,12 +6,16 @@ use std::{
     result,
 };
 
+use chrono::Utc;
 use failure::Error;
 use serde::{Deserialize, Serialize};
 use serde_json::Deserializer;
 
 /// Trigger compaction after number of stale records
 const COMPACTION_TRIGGER: u32 = 500;
+
+/// Default name for the log file
+const STORE_NAME: &str = "kvs.store";
 
 /// A [`Result`] that returns type `T` otherwise [`Error`]
 pub type Result<T> = result::Result<T, Error>;
@@ -28,7 +32,7 @@ pub struct KvStore {
 impl KvStore {
     pub fn open(path: impl Into<PathBuf>) -> Result<KvStore> {
         let mut path_buf = PathBuf::from(path.into());
-        path_buf.push("kvs.store");
+        path_buf.push(STORE_NAME);
 
         let file = OpenOptions::new()
             .write(true)
@@ -69,15 +73,6 @@ impl KvStore {
         let command_json = serde_json::to_string(&command).unwrap();
         let current_offset = self.log.seek(std::io::SeekFrom::End(0))?;
         self.log.write_all(command_json.as_bytes())?;
-        // TODO: log compaction strategy
-        // get to know if key already existed or not and get the previous offset if it did
-        // maintain a separate set of offsets to be removed from the file
-        // seek from the beginning and read as stream
-        // skip the offsets to be removed by doing a look-up from the set
-        // write the valid entries in another file
-        // make the store point to the new file and then continue
-        // do same thing on every write but only if the set has grown to a certain amount - this is to avoid frequent compaction
-        // check efficiency for removal of values from a set - or else try another data structure, stack?
         self.index
             .insert(key.to_string(), current_offset)
             .map(|o| self.offsets_to_rm.insert(o));
@@ -89,7 +84,7 @@ impl KvStore {
             let mut byte_offset = 0;
             let mut new_byte_offset = 0;
             let mut new_path = self.path.clone();
-            new_path.push("kvs_new.store");
+            new_path.push(format!("{}.{}", STORE_NAME, Utc::now()));
             let mut new_log = OpenOptions::new()
                 .create(true)
                 .append(true)
@@ -111,10 +106,10 @@ impl KvStore {
             }
             // change the log
             let mut old_path = self.path.clone();
-            old_path.push("kvs.store");
+            old_path.push(STORE_NAME);
             fs::rename(&new_path, &old_path).unwrap();
             let mut new_path = self.path.clone();
-            new_path.push("kvs.store");
+            new_path.push(STORE_NAME);
             self.log = OpenOptions::new()
                 .append(true)
                 .read(true)
