@@ -43,13 +43,7 @@ impl KvStore {
         let mut path_buf = PathBuf::from(path.into());
         path_buf.push(STORE_NAME);
 
-        let file = OpenOptions::new()
-            .write(true)
-            .append(true)
-            .create(true)
-            .read(true)
-            .open(&path_buf)
-            .unwrap();
+        let file = open_file(&path_buf).unwrap();
 
         // replay log and create index
         let index = replay(&file)?;
@@ -161,6 +155,17 @@ impl KvStore {
     }
 }
 
+/// Opens a file at a sepcified path. It creates the file it it doesn't already exist.
+fn open_file(path: &PathBuf) -> Result<File> {
+    OpenOptions::new()
+        .write(true)
+        .append(true)
+        .create(true)
+        .read(true)
+        .open(path)
+        .map_err(|e| e.into())
+}
+
 /// Replay the log to create the index in-memory. This only keeps the valid keys in the index.
 /// The index stores the key and the byte offset of the data stored in the log. If the log has a set entry for a key and then a remove entry then the key will effectively be removed from the index.
 fn replay(file: &File) -> Result<HashMap<String, u64>> {
@@ -190,12 +195,7 @@ fn compact_log(store: &mut KvStore) -> Result<()> {
     let mut new_path = store.path.clone();
     new_path.push(format!("{}.{}", STORE_NAME, Utc::now()));
     // open a new file where the log will be rebuilt
-    let mut new_log = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .write(true)
-        .open(&new_path)
-        .unwrap();
+    let mut new_log = open_file(&new_path).unwrap();
     // replay the current log
     while let Some(Ok(c)) = stream.next() {
         // skip the records to be removed
@@ -219,12 +219,7 @@ fn compact_log(store: &mut KvStore) -> Result<()> {
     let mut new_path = store.path.clone();
     new_path.push(STORE_NAME);
     // point the log to the newly built, compacted log
-    store.log = OpenOptions::new()
-        .append(true)
-        .read(true)
-        .write(true)
-        .open(&new_path)
-        .unwrap();
+    store.log = open_file(&new_path).unwrap();
     Ok(())
 }
 
