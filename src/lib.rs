@@ -73,49 +73,13 @@ impl KvStore {
         let command_json = serde_json::to_string(&command).unwrap();
         let current_offset = self.log.seek(std::io::SeekFrom::End(0))?;
         self.log.write_all(command_json.as_bytes())?;
+        // store the byte offset in the offsets_to_rm set if the key was overwritten
         self.index
             .insert(key.to_string(), current_offset)
             .map(|o| self.offsets_to_rm.insert(o));
 
         if self.offsets_to_rm.len() > COMPACTION_TRIGGER as usize {
-            self.log.seek(std::io::SeekFrom::Start(0))?;
-            let mut stream = Deserializer::from_reader(BufReader::new(&self.log)) // new line
-                .into_iter::<Command>();
-            let mut byte_offset = 0;
-            let mut new_byte_offset = 0;
-            let mut new_path = self.path.clone();
-            new_path.push(format!("{}.{}", STORE_NAME, Utc::now()));
-            let mut new_log = OpenOptions::new()
-                .create(true)
-                .append(true)
-                .write(true)
-                .open(&new_path)
-                .unwrap();
-            while let Some(Ok(c)) = stream.next() {
-                if self.offsets_to_rm.contains(&byte_offset) {
-                    self.offsets_to_rm.remove(&byte_offset);
-                    byte_offset = stream.byte_offset() as u64;
-                    continue;
-                }
-                let bytes_written = new_log
-                    .write(serde_json::to_string(&c).unwrap().as_bytes())
-                    .unwrap();
-                self.index.insert(c.key, new_byte_offset);
-                new_byte_offset += bytes_written as u64;
-                byte_offset = stream.byte_offset() as u64;
-            }
-            // change the log
-            let mut old_path = self.path.clone();
-            old_path.push(STORE_NAME);
-            fs::rename(&new_path, &old_path).unwrap();
-            let mut new_path = self.path.clone();
-            new_path.push(STORE_NAME);
-            self.log = OpenOptions::new()
-                .append(true)
-                .read(true)
-                .write(true)
-                .open(&new_path)
-                .unwrap();
+            compact_log(self)?;
         }
         self.log.seek(std::io::SeekFrom::Start(0))?;
         Ok(())
@@ -177,6 +141,8 @@ impl KvStore {
                 command_type: CommandType::RM,
             };
             let command_json = serde_json::to_string(&command)?;
+            let bytes_offset = self.log.seek(std::io::SeekFrom::Current(0))?;
+            self.offsets_to_rm.insert(bytes_offset);
             self.log.write_all(command_json.as_bytes())?;
             self.log.seek(std::io::SeekFrom::Start(0))?;
             Ok(())
@@ -186,6 +152,8 @@ impl KvStore {
     }
 }
 
+/// Replay the log to create the index in-memory. This only keeps the valid keys in the index.
+/// The index stores the key and the byte offset of the data stored in the log. If the log has a set entry for a key and then a remove entry then the key will effectively be removed from the index.
 fn replay(file: &File) -> Result<HashMap<String, u64>> {
     let mut stream = Deserializer::from_reader(BufReader::new(file)) // new line
         .into_iter::<Command>();
@@ -200,6 +168,55 @@ fn replay(file: &File) -> Result<HashMap<String, u64>> {
         byte_offset = stream.byte_offset();
     }
     Ok(index)
+}
+
+/// Compacts the log by replaying the log and recreating the index with effectively valid keys only.
+/// It rebuilds the log as a new file and then renames it to the actual name.
+fn compact_log(store: &mut KvStore) -> Result<()> {
+    store.log.seek(std::io::SeekFrom::Start(0))?;
+    let mut stream = Deserializer::from_reader(BufReader::new(&store.log)) // new line
+        .into_iter::<Command>();
+    let mut byte_offset = 0;
+    let mut new_byte_offset = 0;
+    let mut new_path = store.path.clone();
+    new_path.push(format!("{}.{}", STORE_NAME, Utc::now()));
+    // open a new file where the log will be rebuilt
+    let mut new_log = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .write(true)
+        .open(&new_path)
+        .unwrap();
+    // replay the current log
+    while let Some(Ok(c)) = stream.next() {
+        // skip the records to be removed
+        if store.offsets_to_rm.contains(&byte_offset) {
+            store.offsets_to_rm.remove(&byte_offset);
+            byte_offset = stream.byte_offset() as u64;
+            continue;
+        }
+        let bytes_written = new_log
+            .write(serde_json::to_string(&c).unwrap().as_bytes())
+            .unwrap();
+        // insert valid records with new byte offset
+        store.index.insert(c.key, new_byte_offset);
+        new_byte_offset += bytes_written as u64;
+        byte_offset = stream.byte_offset() as u64;
+    }
+    let mut old_path = store.path.clone();
+    old_path.push(STORE_NAME);
+    // rename the new log to the actual name
+    fs::rename(&new_path, &old_path).unwrap();
+    let mut new_path = store.path.clone();
+    new_path.push(STORE_NAME);
+    // point the log to the newly built, compacted log
+    store.log = OpenOptions::new()
+        .append(true)
+        .read(true)
+        .write(true)
+        .open(&new_path)
+        .unwrap();
+    Ok(())
 }
 
 /// A container for storing commands
