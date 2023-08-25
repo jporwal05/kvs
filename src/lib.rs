@@ -1,6 +1,6 @@
 use std::{
-    collections::HashMap,
-    fs::{File, OpenOptions},
+    collections::{HashMap, HashSet},
+    fs::{self, File, OpenOptions},
     io::{BufReader, Seek, Write},
     path::PathBuf,
     result,
@@ -10,6 +10,9 @@ use failure::Error;
 use serde::{Deserialize, Serialize};
 use serde_json::Deserializer;
 
+/// Trigger compaction after number of stale records
+const COMPACTION_TRIGGER: u32 = 500;
+
 /// A [`Result`] that returns type `T` otherwise [`Error`]
 pub type Result<T> = result::Result<T, Error>;
 
@@ -17,6 +20,8 @@ pub type Result<T> = result::Result<T, Error>;
 pub struct KvStore {
     index: HashMap<String, u64>,
     log: File,
+    offsets_to_rm: HashSet<u64>,
+    path: PathBuf,
 }
 
 /// Implementation of [`KvStore`]
@@ -30,7 +35,7 @@ impl KvStore {
             .append(true)
             .create(true)
             .read(true)
-            .open(path_buf)
+            .open(&path_buf)
             .unwrap();
 
         // replay log and create index
@@ -39,6 +44,8 @@ impl KvStore {
         Ok(KvStore {
             log: file,
             index: index,
+            offsets_to_rm: HashSet::new(),
+            path: path_buf.parent().unwrap().to_path_buf(),
         })
     }
 
@@ -71,7 +78,50 @@ impl KvStore {
         // make the store point to the new file and then continue
         // do same thing on every write but only if the set has grown to a certain amount - this is to avoid frequent compaction
         // check efficiency for removal of values from a set - or else try another data structure, stack?
-        self.index.insert(key.to_string(), current_offset);
+        self.index
+            .insert(key.to_string(), current_offset)
+            .map(|o| self.offsets_to_rm.insert(o));
+
+        if self.offsets_to_rm.len() > COMPACTION_TRIGGER as usize {
+            self.log.seek(std::io::SeekFrom::Start(0))?;
+            let mut stream = Deserializer::from_reader(BufReader::new(&self.log)) // new line
+                .into_iter::<Command>();
+            let mut byte_offset = 0;
+            let mut new_byte_offset = 0;
+            let mut new_path = self.path.clone();
+            new_path.push("kvs_new.store");
+            let mut new_log = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .write(true)
+                .open(&new_path)
+                .unwrap();
+            while let Some(Ok(c)) = stream.next() {
+                if self.offsets_to_rm.contains(&byte_offset) {
+                    self.offsets_to_rm.remove(&byte_offset);
+                    byte_offset = stream.byte_offset() as u64;
+                    continue;
+                }
+                let bytes_written = new_log
+                    .write(serde_json::to_string(&c).unwrap().as_bytes())
+                    .unwrap();
+                self.index.insert(c.key, new_byte_offset);
+                new_byte_offset += bytes_written as u64;
+                byte_offset = stream.byte_offset() as u64;
+            }
+            // change the log
+            let mut old_path = self.path.clone();
+            old_path.push("kvs.store");
+            fs::rename(&new_path, &old_path).unwrap();
+            let mut new_path = self.path.clone();
+            new_path.push("kvs.store");
+            self.log = OpenOptions::new()
+                .append(true)
+                .read(true)
+                .write(true)
+                .open(&new_path)
+                .unwrap();
+        }
         self.log.seek(std::io::SeekFrom::Start(0))?;
         Ok(())
     }

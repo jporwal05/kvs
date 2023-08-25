@@ -14,8 +14,6 @@ Run `cargo doc --open`
 - Run `cargo test --doc` for documentation tests
 - Run `cargo test` for implementation tests
 
-`Log compaction` is not implemented yet so test named `compaction` will fail.
-
 ## usage as CLI
 - `cargo run set key1 value1`
 - `cargo run get key1`
